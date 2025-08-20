@@ -45,10 +45,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/watchlogserver/rum-react.git"
+    "url": "git+https://github.com/Watchlog-monitoring/watchlog-rum-react.git"
   },
   "bugs": {
-    "url": "https://github.com/watchlogserver/rum-react/issues"
+    "url": "https://github.com/Watchlog-monitoring/watchlog-rum-react/issues"
   },
   "homepage": "https://watchlog.io"
   
