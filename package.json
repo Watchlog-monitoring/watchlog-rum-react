@@ -1,0 +1,55 @@
+{
+  "name": "@watchlog/rum-react",
+  "version": "0.1.0",
+  "description": "Watchlog Real User Monitoring SDK for React with Router integration",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "browser": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.tsx --format esm,cjs --clean --external react-router-dom && tsc --emitDeclarationOnly --declaration --project tsconfig.json --outDir dist",
+    "dev": "tsup src/index.tsx --format esm,cjs --watch",
+    "check": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=17"
+  },
+  "peerDependenciesMeta": {
+    "react-router-dom": {
+      "optional": true
+    },
+    "web-vitals": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/react": "^18.2.64",
+    "tsup": "^8.0.1",
+    "typescript": "^5.4.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/watchlogserver/rum-react.git"
+  },
+  "bugs": {
+    "url": "https://github.com/watchlogserver/rum-react/issues"
+  },
+  "homepage": "https://watchlog.io"
+  
+}
