@@ -27,7 +27,7 @@ export interface RumConfig {
   environment?: string;
   release?: string;
   userId?: string;
-
+  ignoreSelfNetwork?: boolean;
   sampleRate?: number;
   networkSampleRate?: number; // ignored by default since we don't capture network
   batchMax?: number;
@@ -145,7 +145,7 @@ type Defaulted = Required<Pick<RumConfig,
   | 'sampleRate' | 'batchMax' | 'flushInterval' | 'maxQueueBytes'
   | 'captureErrors' | 'captureFetch' | 'captureXHR' | 'captureResources'
   | 'maxResourceCount' | 'captureLongTasks' | 'enableWebVitals'
-  | 'ignoreSelfResources'
+  | 'ignoreSelfResources' | 'ignoreSelfNetwork'
   | 'sessionTtlMs' | 'autoTrackInitialView'>>;
 export type RumConfigWithDefaults = Omit<RumConfig, keyof Defaulted> & Defaulted;
 
@@ -187,6 +187,7 @@ function applyDefaults(cfg: RumConfig): RumConfigWithDefaults {
     enableWebVitals: cfg.enableWebVitals ?? true,
 
     ignoreSelfResources: cfg.ignoreSelfResources ?? true,
+    ignoreSelfNetwork:   cfg.ignoreSelfNetwork   ?? true,
 
     sessionTtlMs: cfg.sessionTtlMs ?? DEFAULT_SESSION_TTL,
 
@@ -434,6 +435,17 @@ function attachErrorHandlers() {
   current?.unsubscribers.push(() => window.removeEventListener("unhandledrejection", onRejection));
 }
 
+function isSelfRUM(url: string): boolean {
+  try {
+    const epBase = originAndPath(current?.config.endpoint || DEFAULT_ENDPOINT);
+    const uBase  = originAndPath(url || "");
+    if (!uBase) return false;
+    // هم origin+pathname یکسان باشد، هم هر مسیر پایانی /rum را هم پوشش بده
+    return uBase.startsWith(epBase) || /\/rum($|[/?#])/.test(uBase);
+  } catch { return false; }
+}
+
+
 // ===================== Network (disabled by default; keep functions for opt-in) =====================
 function instrumentFetch() {
   if (!("fetch" in window)) return; const origFetch: typeof fetch = (window.fetch as any).bind(window);
@@ -456,17 +468,42 @@ function instrumentXHR() {
 }
 function maybeNetworkEvent(kind: "fetch" | "xhr", args: any[], res: any | undefined, started: number, _err?: any) {
   if (!current || !current.sampled) return;
-  // guard: only emit if user explicitly enabled captureFetch/XHR
   if (!current.config.captureFetch && !current.config.captureXHR) return;
+
   try {
     let url = ""; let method = "GET"; let status: number | undefined; let ok: boolean | undefined;
-    if (kind === "fetch") { const [input, init] = args as [RequestInfo, RequestInit | undefined]; url = typeof input === "string" ? input : (input as Request).url; method = (init?.method || (typeof input !== "string" && (input as Request).method) || "GET").toUpperCase(); status = (res as any)?.status; ok = (res as any)?.ok; }
-    else { method = (args[0] || "GET").toUpperCase(); url = args[1] || ""; status = (res as any)?.status; ok = (res as any)?.ok; }
+
+    if (kind === "fetch") {
+      const [input, init] = args as [RequestInfo, RequestInit | undefined];
+      url = typeof input === "string" ? input : (input as Request).url;
+      method = (init?.method || (typeof input !== "string" && (input as Request).method) || "GET").toUpperCase();
+      status = (res as any)?.status;
+      ok = (res as any)?.ok;
+    } else {
+      method = (args[0] || "GET").toUpperCase();
+      url = args[1] || "";
+      status = (res as any)?.status;
+      ok = (res as any)?.ok;
+    }
+
+    // ⛔ خود RUM endpoint رو گزارش نده
+    if (current.config.ignoreSelfNetwork && isSelfRUM(url)) return;
+
     const duration = Math.max(0, now() - started);
-    const ev: RumEvent = { type: "network", ts: now(), sessionId: current!.sessionId, deviceId: current!.deviceId, seq: nextSeq(), context: baseContext(), data: { kind, url: originAndPath(url), method, status, ok, duration } } as any;
+    const ev: RumEvent = {
+      type: "network",
+      ts: now(),
+      sessionId: current!.sessionId,
+      deviceId: current!.deviceId,
+      seq: nextSeq(),
+      context: baseContext(),
+      data: { kind, url: originAndPath(url), method, status, ok, duration }
+    } as any;
+
     dispatch(ev);
   } catch {}
 }
+
 
 // ===================== Resources & Long Tasks =====================
 function observeResources(maxCount: number) {
@@ -545,21 +582,36 @@ function observeLongTasks() {
 }
 
 // ===================== Web Vitals (safe dynamic import) =====================
+// ===================== Web Vitals (Vite-resolved dynamic import) =====================
+// ===================== Web Vitals (Vite-resolved dynamic import) =====================
 async function attachWebVitals() {
   try {
-    // Avoid hard dep; also avoid pre-bundle
+    // اجازه بده Vite خودش rewrite کند
     // @ts-ignore
-    const dynImport = new Function('m', 'return import(/* @vite-ignore */ m)');
-    const mod: any = await (dynImport as any)('web-vitals').catch(() => null);
-    if (!mod) return;
+    const mod: any = await import('web-vitals');
+
     const send = (m: { id: string; name: string; value: number }) => {
       if (!current || !current.sampled) return;
-      const ev: RumEvent = { type: "web_vital", ts: now(), sessionId: current!.sessionId, deviceId: current!.deviceId, seq: nextSeq(), context: baseContext(), data: { id: m.id, name: m.name, value: m.value } } as any;
+      const ev: RumEvent = {
+        type: "web_vital",
+        ts: now(),
+        sessionId: current!.sessionId,
+        deviceId: current!.deviceId,
+        seq: nextSeq(),
+        context: baseContext(),
+        data: { id: m.id, name: m.name, value: m.value }
+      } as any;
       dispatch(ev);
     };
-    mod.onCLS?.(send); mod.onLCP?.(send); mod.onFID?.(send); mod.onINP?.(send); mod.onTTFB?.(send);
+
+    // با reportAllChanges تا در طول حیات صفحه هم fire شوند
+    mod.onCLS?.(send, { reportAllChanges: true });
+    mod.onINP?.(send, { reportAllChanges: true });   // نیاز به تعامل کاربر دارد
+    mod.onLCP?.(send, { reportAllChanges: true });
+    mod.onTTFB?.(send);
   } catch {}
 }
+
 
 // ===================== Path Normalization =====================
 function computeNormalizedPath(pathname: string): string {
